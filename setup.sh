@@ -18,7 +18,11 @@ LATEST_RELEASE_API="https://api.github.com/repos/itsFLoKi/DaggerConnect/releases
 
 show_banner() {
     echo -e "${CYAN}"
-    echo -e "${GREEN}        DaggerConnect Installer${NC}"
+    echo -e "${GREEN}***  DaggerConnect  ***${NC}"
+    echo -e "${BLUE}_____________________________${NC}"
+    echo -e "${RED}***TELEGRAM : @DaggerConnect ***${RED}"
+    echo -e "${BLUE}_____________________________${NC}"
+    echo -e "${GREEN}***  DaggerConnect ***${NC}"
     echo ""
 }
 
@@ -33,9 +37,9 @@ install_dependencies() {
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
     if command -v apt &>/dev/null; then
         apt update -qq
-        apt install -y wget curl tar git > /dev/null 2>&1 || { echo -e "${RED}Failed to install dependencies${NC}"; exit 1; }
+        apt install -y wget curl tar git openssl > /dev/null 2>&1 || { echo -e "${RED}Failed to install dependencies${NC}"; exit 1; }
     elif command -v yum &>/dev/null; then
-        yum install -y wget curl tar git > /dev/null 2>&1 || { echo -e "${RED}Failed to install dependencies${NC}"; exit 1; }
+        yum install -y wget curl tar git openssl > /dev/null 2>&1 || { echo -e "${RED}Failed to install dependencies${NC}"; exit 1; }
     else
         echo -e "${RED}❌ Unsupported package manager${NC}"
         exit 1
@@ -164,6 +168,32 @@ update_binary() {
     main_menu
 }
 
+generate_ssl_cert() {
+    echo -e "${YELLOW}Generating self-signed SSL certificate...${NC}"
+
+    read -p "Domain name for certificate (e.g., www.google.com): " CERT_DOMAIN
+    CERT_DOMAIN=${CERT_DOMAIN:-www.google.com}
+
+    mkdir -p "$CONFIG_DIR/certs"
+
+    openssl req -x509 -newkey rsa:4096 -keyout "$CONFIG_DIR/certs/key.pem" \
+        -out "$CONFIG_DIR/certs/cert.pem" -days 365 -nodes \
+        -subj "/C=US/ST=California/L=San Francisco/O=MyCompany/CN=${CERT_DOMAIN}" \
+        2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ SSL certificate generated${NC}"
+        echo -e "  Certificate: $CONFIG_DIR/certs/cert.pem"
+        echo -e "  Private Key: $CONFIG_DIR/certs/key.pem"
+        CERT_FILE="$CONFIG_DIR/certs/cert.pem"
+        KEY_FILE="$CONFIG_DIR/certs/key.pem"
+    else
+        echo -e "${RED}✖ Failed to generate certificate${NC}"
+        CERT_FILE=""
+        KEY_FILE=""
+    fi
+}
+
 create_systemd_service() {
     local MODE=$1
     local SERVICE_NAME="DaggerConnect-${MODE}"
@@ -193,6 +223,106 @@ EOF
     echo -e "${GREEN}✓ Systemd service for ${MODE^} created: ${SERVICE_NAME}.service${NC}"
 }
 
+configure_advanced_settings() {
+    local MODE=$1
+
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}      ADVANCED SETTINGS (Optional)${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo ""
+    read -p "Configure advanced settings? [y/N]: " ADV
+
+    if [[ ! $ADV =~ ^[Yy]$ ]]; then
+        # Use defaults
+        SMUX_KEEPALIVE=""
+        SMUX_MAXRECV=""
+        SMUX_MAXSTREAM=""
+        SMUX_FRAMESIZE=""
+        TCP_NODELAY=""
+        TCP_KEEPALIVE=""
+        TCP_READBUFFER=""
+        TCP_WRITEBUFFER=""
+        MAX_CONNECTIONS=""
+        return
+    fi
+
+    echo ""
+    echo -e "${YELLOW}SMUX Configuration:${NC}"
+    read -p "  KeepAlive interval (seconds) [8]: " SMUX_KEEPALIVE
+    SMUX_KEEPALIVE=${SMUX_KEEPALIVE:-8}
+
+    read -p "  Max receive buffer (bytes) [8388608]: " SMUX_MAXRECV
+    SMUX_MAXRECV=${SMUX_MAXRECV:-8388608}
+
+    read -p "  Max stream buffer (bytes) [8388608]: " SMUX_MAXSTREAM
+    SMUX_MAXSTREAM=${SMUX_MAXSTREAM:-8388608}
+
+    read -p "  Frame size (bytes) [32768]: " SMUX_FRAMESIZE
+    SMUX_FRAMESIZE=${SMUX_FRAMESIZE:-32768}
+
+    echo ""
+    echo -e "${YELLOW}TCP Configuration:${NC}"
+    read -p "  Enable TCP NoDelay? [Y/n]: " TCP_ND
+    [[ $TCP_ND =~ ^[Nn]$ ]] && TCP_NODELAY="false" || TCP_NODELAY="true"
+
+    read -p "  TCP KeepAlive (seconds) [15]: " TCP_KEEPALIVE
+    TCP_KEEPALIVE=${TCP_KEEPALIVE:-15}
+
+    read -p "  TCP Read Buffer (bytes) [8388608]: " TCP_READBUFFER
+    TCP_READBUFFER=${TCP_READBUFFER:-8388608}
+
+    read -p "  TCP Write Buffer (bytes) [8388608]: " TCP_WRITEBUFFER
+    TCP_WRITEBUFFER=${TCP_WRITEBUFFER:-8388608}
+
+    echo ""
+    echo -e "${YELLOW}Connection Limits:${NC}"
+    read -p "  Max connections [2000]: " MAX_CONNECTIONS
+    MAX_CONNECTIONS=${MAX_CONNECTIONS:-2000}
+}
+
+configure_http_mimicry() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}      HTTP MIMICRY SETTINGS${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo ""
+
+    read -p "Fake domain (e.g., www.google.com) [www.google.com]: " HTTP_DOMAIN
+    HTTP_DOMAIN=${HTTP_DOMAIN:-www.google.com}
+
+    read -p "Fake path (e.g., /search) [/search]: " HTTP_PATH
+    HTTP_PATH=${HTTP_PATH:-/search}
+
+    echo ""
+    echo -e "${YELLOW}Select User-Agent:${NC}"
+    echo "  1) Chrome Windows (default)"
+    echo "  2) Firefox Windows"
+    echo "  3) Chrome macOS"
+    echo "  4) Safari macOS"
+    echo "  5) Chrome Android"
+    echo "  6) Custom"
+    read -p "Choice [1-6]: " UA_CHOICE
+
+    case $UA_CHOICE in
+        1) HTTP_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ;;
+        2) HTTP_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0" ;;
+        3) HTTP_UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ;;
+        4) HTTP_UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15" ;;
+        5) HTTP_UA="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36" ;;
+        6)
+            read -p "Enter custom User-Agent: " HTTP_UA
+            ;;
+        *) HTTP_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ;;
+    esac
+
+    read -p "Enable chunked encoding? [Y/n]: " CHUNKED
+    [[ $CHUNKED =~ ^[Nn]$ ]] && HTTP_CHUNKED="false" || HTTP_CHUNKED="true"
+
+    read -p "Enable session cookies? [Y/n]: " COOKIES
+    [[ $COOKIES =~ ^[Nn]$ ]] && HTTP_COOKIES="false" || HTTP_COOKIES="true"
+}
+
 install_server() {
     show_banner
     mkdir -p "$CONFIG_DIR"
@@ -203,17 +333,21 @@ install_server() {
     echo ""
 
     echo -e "${YELLOW}Select Transport Type:${NC}"
-    echo "  1) tcpmux  - TCP Multiplexing (Recommended)"
-    echo "  2) kcpmux  - KCP Multiplexing (UDP based)"
-    echo "  3) wsmux   - WebSocket"
-    echo "  4) wssmux  - WebSocket Secure (TLS)"
+    echo "  1) tcpmux   - TCP Multiplexing (Simple & Fast)"
+    echo "  2) kcpmux   - KCP Multiplexing (UDP based, High Speed)"
+    echo "  3) wsmux    - WebSocket (HTTP compatible)"
+    echo "  4) wssmux   - WebSocket Secure (HTTPS with TLS)"
+    echo "  5) httpmux  - HTTP Mimicry (DPI bypass, Realistic)"
+    echo "  6) httpsmux - HTTPS Mimicry (TLS + DPI bypass) ⭐ Recommended"
     echo ""
-    read -p "Choice [1-4]: " transport_choice
+    read -p "Choice [1-6]: " transport_choice
     case $transport_choice in
         1) TRANSPORT="tcpmux" ;;
         2) TRANSPORT="kcpmux" ;;
         3) TRANSPORT="wsmux" ;;
         4) TRANSPORT="wssmux" ;;
+        5) TRANSPORT="httpmux" ;;
+        6) TRANSPORT="httpsmux" ;;
         *) TRANSPORT="tcpmux" ;;
     esac
 
@@ -253,30 +387,75 @@ install_server() {
 
     CERT_FILE=""
     KEY_FILE=""
-    if [ "$TRANSPORT" == "wssmux" ]; then
+    if [ "$TRANSPORT" == "wssmux" ] || [ "$TRANSPORT" == "httpsmux" ]; then
         echo ""
-        echo -e "${YELLOW}TLS Configuration (Required for wssmux):${NC}"
-        read -p "Certificate file path: " CERT_FILE
-        read -p "Private key file path: " KEY_FILE
-        if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-            echo -e "${YELLOW}⚠️  Certificate files not found. You can add them later.${NC}"
-            CERT_FILE=""
-            KEY_FILE=""
+        echo -e "${YELLOW}TLS Configuration (Required for wssmux/httpsmux):${NC}"
+        echo "  1) Generate self-signed certificate (Quick & Easy)"
+        echo "  2) Use existing certificate files"
+        read -p "Choice [1-2]: " cert_choice
+
+        if [ "$cert_choice" == "1" ]; then
+            generate_ssl_cert
+        else
+            read -p "Certificate file path: " CERT_FILE
+            read -p "Private key file path: " KEY_FILE
+            if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+                echo -e "${YELLOW}⚠️  Certificate files not found. Generating self-signed...${NC}"
+                generate_ssl_cert
+            fi
         fi
+    fi
+
+    # HTTP Mimicry configuration
+    if [ "$TRANSPORT" == "httpmux" ] || [ "$TRANSPORT" == "httpsmux" ]; then
+        configure_http_mimicry
     fi
 
     echo ""
     read -p "Enable Traffic Obfuscation? [Y/n]: " OBFUS_ENABLED
     if [[ ! $OBFUS_ENABLED =~ ^[Nn]$ ]]; then
         OBFUS_ENABLED="true"
+
+        echo ""
+        read -p "Configure obfuscation details? [y/N]: " OBFUS_DETAILS
+        if [[ $OBFUS_DETAILS =~ ^[Yy]$ ]]; then
+            read -p "  Min padding (bytes) [16]: " OBFUS_MIN_PAD
+            OBFUS_MIN_PAD=${OBFUS_MIN_PAD:-16}
+
+            read -p "  Max padding (bytes) [512]: " OBFUS_MAX_PAD
+            OBFUS_MAX_PAD=${OBFUS_MAX_PAD:-512}
+
+            read -p "  Min delay (ms) [5]: " OBFUS_MIN_DELAY
+            OBFUS_MIN_DELAY=${OBFUS_MIN_DELAY:-5}
+
+            read -p "  Max delay (ms) [50]: " OBFUS_MAX_DELAY
+            OBFUS_MAX_DELAY=${OBFUS_MAX_DELAY:-50}
+        else
+            OBFUS_MIN_PAD=16
+            OBFUS_MAX_PAD=512
+            OBFUS_MIN_DELAY=5
+            OBFUS_MAX_DELAY=50
+        fi
     else
         OBFUS_ENABLED="false"
+        OBFUS_MIN_PAD=16
+        OBFUS_MAX_PAD=512
+        OBFUS_MIN_DELAY=5
+        OBFUS_MAX_DELAY=50
     fi
+
+    # Advanced settings
+    configure_advanced_settings "server"
 
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}      PORT MAPPINGS${NC}"
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}تنظیمات پورت:${NC}"
+    echo "  Bind   = پورتی که روی این سرور باز می‌شود"
+    echo "  Target = پورت مقصد (معمولاً localhost)"
+    echo ""
     MAPPINGS=""
     COUNT=0
     while true; do
@@ -289,17 +468,41 @@ install_server() {
         echo "  3) both (tcp + udp)"
         read -p "Choice [1-3]: " proto_choice
 
+        # Get BIND port
         while true; do
-            read -p "Port Script (required): " SCRIPT_PORT
-            if [[ -n "$SCRIPT_PORT" ]] && [[ "$SCRIPT_PORT" =~ ^[0-9]+$ ]] && [ "$SCRIPT_PORT" -ge 1 ] && [ "$SCRIPT_PORT" -le 65535 ]; then
+            echo ""
+            echo -e "${CYAN}Bind Settings (پورت روی این سرور):${NC}"
+            read -p "Bind IP [0.0.0.0]: " BIND_IP
+            BIND_IP=${BIND_IP:-0.0.0.0}
+
+            read -p "Bind Port (e.g., 2222): " BIND_PORT
+            if [[ -n "$BIND_PORT" ]] && [[ "$BIND_PORT" =~ ^[0-9]+$ ]] && [ "$BIND_PORT" -ge 1 ] && [ "$BIND_PORT" -le 65535 ]; then
                 break
             else
                 echo -e "${RED}⚠ Invalid port! Enter a number between 1-65535${NC}"
             fi
         done
 
-        BIND="0.0.0.0:${SCRIPT_PORT}"
-        TARGET="127.0.0.1:${SCRIPT_PORT}"
+        # Get TARGET port
+        while true; do
+            echo ""
+            echo -e "${CYAN}Target Settings (پورت مقصد):${NC}"
+            read -p "Target IP [127.0.0.1]: " TARGET_IP
+            TARGET_IP=${TARGET_IP:-127.0.0.1}
+
+            read -p "Target Port (e.g., 22): " TARGET_PORT
+            if [[ -n "$TARGET_PORT" ]] && [[ "$TARGET_PORT" =~ ^[0-9]+$ ]] && [ "$TARGET_PORT" -ge 1 ] && [ "$TARGET_PORT" -le 65535 ]; then
+                break
+            else
+                echo -e "${RED}⚠ Invalid port! Enter a number between 1-65535${NC}"
+            fi
+        done
+
+        BIND="${BIND_IP}:${BIND_PORT}"
+        TARGET="${TARGET_IP}:${TARGET_PORT}"
+
+        echo ""
+        echo -e "${GREEN}✓ Mapping: ${BIND} → ${TARGET}${NC}"
 
         case $proto_choice in
             1)
@@ -352,12 +555,60 @@ EOF
 
 obfuscation:
   enabled: ${OBFUS_ENABLED}
-  min_padding: 16
-  max_padding: 512
-  min_delay_ms: 5
-  max_delay_ms: 50
+  min_padding: ${OBFUS_MIN_PAD}
+  max_padding: ${OBFUS_MAX_PAD}
+  min_delay_ms: ${OBFUS_MIN_DELAY}
+  max_delay_ms: ${OBFUS_MAX_DELAY}
   burst_chance: 0.15
 EOF
+
+    # Add HTTP Mimicry config if needed
+    if [ "$TRANSPORT" == "httpmux" ] || [ "$TRANSPORT" == "httpsmux" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+http_mimic:
+  fake_domain: "${HTTP_DOMAIN}"
+  fake_path: "${HTTP_PATH}"
+  user_agent: "${HTTP_UA}"
+  chunked_encoding: ${HTTP_CHUNKED}
+  session_cookie: ${HTTP_COOKIES}
+  custom_headers:
+    - "X-Requested-With: XMLHttpRequest"
+    - "Referer: https://${HTTP_DOMAIN}/"
+EOF
+    fi
+
+    # Add SMUX config if configured
+    if [ -n "$SMUX_KEEPALIVE" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+smux:
+  keepalive: ${SMUX_KEEPALIVE}
+  max_recv: ${SMUX_MAXRECV}
+  max_stream: ${SMUX_MAXSTREAM}
+  frame_size: ${SMUX_FRAMESIZE}
+  version: 2
+EOF
+    fi
+
+    # Add Advanced config if configured
+    if [ -n "$TCP_NODELAY" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+advanced:
+  tcp_nodelay: ${TCP_NODELAY}
+  tcp_keepalive: ${TCP_KEEPALIVE}
+  tcp_read_buffer: ${TCP_READBUFFER}
+  tcp_write_buffer: ${TCP_WRITEBUFFER}
+  max_connections: ${MAX_CONNECTIONS}
+  cleanup_interval: 3
+  connection_timeout: 60
+  stream_timeout: 120
+  max_udp_flows: 1000
+  udp_flow_timeout: 300
+  udp_buffer_size: 4194304
+EOF
+    fi
 
     create_systemd_service "server"
 
@@ -375,7 +626,14 @@ EOF
     echo -e "  Transport: ${GREEN}${TRANSPORT}${NC}"
     echo -e "  Profile: ${GREEN}${PROFILE}${NC}"
     echo -e "  Obfuscation: ${GREEN}${OBFUS_ENABLED}${NC}"
+
+    if [ "$TRANSPORT" == "httpmux" ] || [ "$TRANSPORT" == "httpsmux" ]; then
+        echo -e "  HTTP Mimicry: ${GREEN}Enabled${NC}"
+        echo -e "    └─ Domain: ${GREEN}${HTTP_DOMAIN}${NC}"
+    fi
+
     echo ""
+    echo "  Config: $CONFIG_FILE"
     echo "  View logs: journalctl -u DaggerConnect-server -f"
     echo ""
     read -p "Press Enter to return to menu..."
@@ -423,9 +681,20 @@ install_client() {
     read -p "Enable Traffic Obfuscation? [Y/n]: " OBFUS_ENABLED
     if [[ ! $OBFUS_ENABLED =~ ^[Nn]$ ]]; then
         OBFUS_ENABLED="true"
+        OBFUS_MIN_PAD=16
+        OBFUS_MAX_PAD=512
+        OBFUS_MIN_DELAY=5
+        OBFUS_MAX_DELAY=50
     else
         OBFUS_ENABLED="false"
+        OBFUS_MIN_PAD=16
+        OBFUS_MAX_PAD=512
+        OBFUS_MIN_DELAY=5
+        OBFUS_MAX_DELAY=50
     fi
+
+    # Advanced settings
+    configure_advanced_settings "client"
 
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
@@ -433,6 +702,7 @@ install_client() {
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
 
     declare -a PATH_ENTRIES=()
+    declare -a HTTP_CONFIGS=()
     COUNT=0
 
     while true; do
@@ -440,17 +710,21 @@ install_client() {
         echo -e "${YELLOW}Add Connection Path #$((COUNT+1))${NC}"
 
         echo "Select Transport Type:"
-        echo "  1) tcpmux  - TCP Multiplexing (Recommended)"
-        echo "  2) kcpmux  - KCP Multiplexing (UDP based)"
-        echo "  3) wsmux   - WebSocket"
-        echo "  4) wssmux  - WebSocket Secure (TLS)"
+        echo "  1) tcpmux   - TCP Multiplexing"
+        echo "  2) kcpmux   - KCP Multiplexing (UDP)"
+        echo "  3) wsmux    - WebSocket"
+        echo "  4) wssmux   - WebSocket Secure"
+        echo "  5) httpmux  - HTTP Mimicry"
+        echo "  6) httpsmux - HTTPS Mimicry ⭐"
         echo ""
-        read -p "Choice [1-4]: " transport_choice
+        read -p "Choice [1-6]: " transport_choice
         case $transport_choice in
             1) T="tcpmux" ;;
             2) T="kcpmux" ;;
             3) T="wsmux" ;;
             4) T="wssmux" ;;
+            5) T="httpmux" ;;
+            6) T="httpsmux" ;;
             *) T="tcpmux" ;;
         esac
 
@@ -478,6 +752,14 @@ install_client() {
     aggressive_pool: $AGG_POOL
     retry_interval: $RETRY
     dial_timeout: $DIAL_TIMEOUT")
+
+        # HTTP Mimicry for this path
+        if [ "$T" == "httpmux" ] || [ "$T" == "httpsmux" ]; then
+            if [ ${#HTTP_CONFIGS[@]} -eq 0 ]; then
+                configure_http_mimicry
+                HTTP_CONFIGS+=("yes")
+            fi
+        fi
 
         COUNT=$((COUNT+1))
         echo -e "${GREEN}✓ Path added: $T -> $ADDR (pool: $POOL, aggressive: $AGG_POOL)${NC}"
@@ -509,12 +791,56 @@ EOF
 
 obfuscation:
   enabled: ${OBFUS_ENABLED}
-  min_padding: 16
-  max_padding: 512
-  min_delay_ms: 5
-  max_delay_ms: 50
+  min_padding: ${OBFUS_MIN_PAD}
+  max_padding: ${OBFUS_MAX_PAD}
+  min_delay_ms: ${OBFUS_MIN_DELAY}
+  max_delay_ms: ${OBFUS_MAX_DELAY}
   burst_chance: 0.15
 EOF
+
+    # Add HTTP Mimicry config if needed
+    if [ ${#HTTP_CONFIGS[@]} -gt 0 ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+http_mimic:
+  fake_domain: "${HTTP_DOMAIN}"
+  fake_path: "${HTTP_PATH}"
+  user_agent: "${HTTP_UA}"
+  chunked_encoding: ${HTTP_CHUNKED}
+  session_cookie: ${HTTP_COOKIES}
+  custom_headers:
+    - "X-Requested-With: XMLHttpRequest"
+    - "Referer: https://${HTTP_DOMAIN}/"
+EOF
+    fi
+
+    # Add SMUX config if configured
+    if [ -n "$SMUX_KEEPALIVE" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+smux:
+  keepalive: ${SMUX_KEEPALIVE}
+  max_recv: ${SMUX_MAXRECV}
+  max_stream: ${SMUX_MAXSTREAM}
+  frame_size: ${SMUX_FRAMESIZE}
+  version: 2
+EOF
+    fi
+
+    # Add Advanced config if configured
+    if [ -n "$TCP_NODELAY" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+advanced:
+  tcp_nodelay: ${TCP_NODELAY}
+  tcp_keepalive: ${TCP_KEEPALIVE}
+  tcp_read_buffer: ${TCP_READBUFFER}
+  tcp_write_buffer: ${TCP_WRITEBUFFER}
+  connection_timeout: 60
+  stream_timeout: 120
+  udp_buffer_size: 4194304
+EOF
+    fi
 
     create_systemd_service "client"
 
@@ -530,6 +856,7 @@ EOF
     echo -e "  Profile: ${GREEN}${PROFILE}${NC}"
     echo -e "  Obfuscation: ${GREEN}${OBFUS_ENABLED}${NC}"
     echo ""
+    echo "  Config: $CONFIG_FILE"
     echo "  View logs: journalctl -u DaggerConnect-client -f"
     echo ""
     read -p "Press Enter to return to menu..."
@@ -645,6 +972,7 @@ uninstall_DaggerConnect() {
     echo "  - DaggerConnect binary"
     echo "  - All configurations (/etc/DaggerConnect)"
     echo "  - Systemd services (server/client)"
+    echo "  - SSL certificates (if any)"
     echo ""
     read -p "Are you sure? [y/N]: " c
 
