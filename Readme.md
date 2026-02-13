@@ -135,7 +135,7 @@
 ### نصب خودکار با اسکریپت Installer (توصیه می‌شود)
 
 ```bash
-curl -O https://raw.githubusercontent.com/itsFLoKi/DaggerConnect/main/setup.sh
+curl -O https://raw.githubusercontent.com/hatinati2/DaggerConnect/main/setup.sh
 chmod +x setup.sh
 sudo ./setup.sh
 ```
@@ -144,7 +144,7 @@ sudo ./setup.sh
 
 ```bash
 # دانلود باینری
-wget https://github.com/itsFLoKi/DaggerConnect/releases/latest/download/DaggerConnect
+wget https://github.com/hatinati2/DaggerConnect/releases/latest/download/DaggerConnect
 chmod +x DaggerConnect
 sudo mv DaggerConnect /usr/local/bin/
 
@@ -1382,4 +1382,5 @@ Made with ❤️ by [itsFLoKi](https://github.com/itsFLoKi)
 [⬆ برگشت به بالا](#-daggerconnect)
 
 </div>
+
 
